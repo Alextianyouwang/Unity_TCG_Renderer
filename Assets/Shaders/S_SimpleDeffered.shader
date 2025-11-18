@@ -19,29 +19,29 @@ Shader "URP/MinimalDeferred"
 
             HLSLPROGRAM
             #pragma target 4.5
+            
+            // Deferred Rendering Path does not support the OpenGL-based graphics API:
+            // Desktop OpenGL, OpenGL ES 3.0, WebGL 2.0.
+            #pragma exclude_renderers gles3 glcore
             #pragma vertex   vert
             #pragma fragment frag
 
-            #pragma multi_compile_fragment _ _WRITE_RENDERING_LAYERS
+            #pragma multi_compile_fragment _RENDER_PASS_ENABLED
+         
+             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
-            #pragma multi_compile_fragment _ _RENDER_PASS_ENABLED
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
                 
             #include "HL_GeneralHelper.hlsl"
-
-
-            #if defined(UNITY_6000_0_OR_NEWER)
-                #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutput.hlsl"
-            #else
-                #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
-            #endif
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
                 half  _Metallic;
                 half  _Smoothness;
+                float _RenderPassEnabled;
             CBUFFER_END
 
             struct Attributes {
@@ -65,6 +65,23 @@ Shader "URP/MinimalDeferred"
                 return OUT;
             }
 
+            void InitializeInputData(Varyings input, out InputData inputData)
+            {
+                inputData = (InputData)0;
+
+                inputData.positionWS = input.positionWS;
+                inputData.positionCS = input.positionHCS;
+                inputData.normalWS = NormalizeNormalPerPixel(input.normalWS);
+                half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
+                inputData.viewDirectionWS = viewDirWS;
+            
+                inputData.shadowCoord = float4(0, 0, 0, 0);
+                inputData.fogCoord = 0.0; // we don't apply fog in the guffer pass
+                inputData.vertexLighting = half3(0, 0, 0);
+           
+                inputData.normalizedScreenSpaceUV = float2(0,0);
+            }
+
             FragmentOutput frag (Varyings IN)
             {
                 // Minimal material values
@@ -82,14 +99,14 @@ Shader "URP/MinimalDeferred"
 
                 // Build minimal InputData the packer expects
                 InputData inputData = (InputData)0;
-                inputData.positionWS      = IN.positionWS;
-                inputData.normalWS        = SafeNormalize(IN.normalWS);
-                inputData.viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos.xyz - IN.positionWS);
+                InitializeInputData(IN, inputData);
 
                 // Pack material into URP's GBuffer and return MRTs
                 return BRDFDataToGbuffer(brdf, inputData, smoothness, emission /*+ bakedGI*/, occlusion);
             }
             ENDHLSL
         }
+
+        
     }
 }
